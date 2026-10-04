@@ -1,0 +1,18 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hello
+  namespace: argocd
+spec:
+  project: default
+  source:
+    # 换成你自己推上去的仓库地址。Argo CD 跑在集群里面，只能拉它能访问的 Git URL。
+    repoURL: https://github.com/pajkatt2013/argocd-learn.git
+    targetRevision: main
+    path: app
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: hello
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
