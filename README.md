@@ -58,9 +58,11 @@ Argo CD 是装在 Kubernetes 里的一个持续交付控制器。它的工作只
 - `deployment.yaml`：1 个 nginx 副本，把上面的网页挂进去
 - `service.yaml`：集群内访问入口
 
-`gitops/application.yaml` 是交给 Argo CD 的那份声明。里面的仓库地址现在是占位符，推到你自己的 GitHub 之后再改。
+`gitops/application.yaml` 是交给 Argo CD 的那份声明，仓库是 `https://github.com/pajkatt2013/argocd-learn.git`，目录是 `app`。
 
 先故意不写自动同步。第一次由你在网页上点 Sync，你才能看见「Git 变了」和「集群变了」是两步。
+
+另外还有一个官方示例 Application，名字是 `guestbook`。它不在这个目录里。它指向 `https://github.com/argoproj/argocd-example-apps.git` 的 `guestbook` 目录，部署到 `guestbook` 命名空间。两个 Application 互不影响。
 
 ## 动手
 
@@ -69,11 +71,11 @@ Argo CD 是装在 Kubernetes 里的一个持续交付控制器。它的工作只
 ### 1. 起一个本地集群
 
 ```powershell
-kind create cluster --name argocd-learn
+kind create cluster --name argocd-learn --image docker.m.daocloud.io/kindest/node:v1.34.0
 kubectl get nodes
 ```
 
-看到一个 `Ready` 的节点就可以。这是你自己电脑上的集群，和公司的 EKS 无关。
+看到一个 `Ready` 的节点就可以。这是你自己电脑上的集群，和公司的 EKS 无关。镜像要写这张已经拉到本地的地址。不写的话 kind 会去 Docker Hub，这台机器直连 `registry-1.docker.io` 会超时。
 
 ### 2. 安装 Argo CD
 
@@ -105,85 +107,86 @@ kubectl -n argocd port-forward svc/argocd-server 8080:443
 
 登录后左边是应用列表，右边是同步状态。现在列表是空的，因为还没有 Application。
 
-### 4. 先用官方示例看一次同步
+集群、Argo CD、`guestbook`、`hello` 这两份 Application 已经在本机建好。下面从这里开始学。第 1 到第 3 步只在重做环境时再用。
 
-Argo CD 跑在集群里面，它拉不到你 Windows 磁盘上的这个文件夹。在你把自己的仓库推上去之前，先用官方公开示例，确认控制器、网页、同步这条链路是通的。
+## 用 guestbook 学看
 
-在网页里点 **NEW APP**，这样填：
+`guestbook` 现在是 Synced、Healthy。Git 修订是 `8088f4c`。集群里有 Deployment `guestbook-ui`、Service `guestbook-ui`，以及 1 个 Running 的 Pod。这份仓库是别人的，你不改它。用它学会读 Argo CD 的界面，以及「集群被人改了，同步会把改动抹掉」。
 
-- Application Name: `guestbook`
-- Project: `default`
-- Sync Policy: Manual
-- Repository URL: `https://github.com/argoproj/argocd-example-apps.git`
-- Revision: `HEAD`
-- Path: `guestbook`
-- Cluster URL: `https://kubernetes.default.svc`
-- Namespace: `guestbook`
+Service 类型是 ClusterIP，地址只在集群内有效。浏览器能打开页面，是因为 k9s 或 kubectl 在你电脑上临时做了端口转发。转发不是 Application 的一部分。k9s 关掉，或者按 Ctrl+C 停掉 `port-forward`，页面就打不开，Pod 还在跑。
 
-创建后状态是 OutOfSync。点 **SYNC**，再点 **SYNCHRONIZE**。变成 Synced 和 Healthy 之后，看一下资源树：Deployment、Service、Pod 都挂在这个 Application 下面。这一棵树就是 Argo CD 的管理界面。
+本地端口和容器端口是隧道的两端。容器里的 Guestbook 听 `80`。你电脑上用 `8082`，是为了避开本机的 80。浏览器地址是 `http://localhost:8082`。
 
-### 5. 换成你自己的网页
-
-在 GitHub 新建一个空仓库，例如 `argocd-learn`。在这个目录里：
+页面打不开时，在 k9s 里选中 Service `guestbook-ui`，按 `Shift+F`，Container Port 填 `80`，Local Port 填 `8082`。或者：
 
 ```powershell
-git init
-git add app gitops README.md
-git commit -m "add hello page for Argo CD practice"
-git branch -M main
-git remote add origin https://github.com/你的用户名/argocd-learn.git
-git push -u origin main
+kubectl -n guestbook port-forward svc/guestbook-ui 8082:80
 ```
 
-把 `gitops/application.yaml` 里的 `repoURL` 改成这个地址，提交并推送。然后：
+然后在 Argo CD 网页里打开 `guestbook`，按这个顺序看：
+
+1. 顶上两盏灯：SYNC 是 Synced，APP HEALTH 是 Healthy。
+2. 资源树里有 Service、Deployment，点进去能看到 Pod。这棵树就是这个 Application 管的全部对象。
+3. 点修订号 `8088f4c`。这是已经应用到集群的那次 Git 提交，作者不是你。
+4. 点 **DIFF**。Synced 的时候这里是空的，表示集群和 Git 渲染结果一致。
+5. 点 **HISTORY AND ROLLBACK**。里面有你点过的那次成功同步。
+
+接着故意把集群改偏，看 Argo CD 怎么发现：
 
 ```powershell
-kubectl apply -f gitops/application.yaml
+kubectl -n guestbook scale deploy/guestbook-ui --replicas=3
+kubectl -n guestbook get pods
 ```
 
-回到 Argo CD 网页，会出现 `hello`。它同样是 OutOfSync。点 Sync。`CreateNamespace=true` 会顺手建出 `hello` 命名空间。
+回到 Argo CD，点 **REFRESH**。SYNC 变成 OutOfSync，HEALTH 多半仍是 Healthy，因为 3 个 Pod 都在跑。点 **DIFF**，能看到副本数从 Git 里的 1 变成了集群里的 3。再点 **SYNC**。副本回到 1，状态回到 Synced。刷新 `http://localhost:8082`，页面还是那个 Guestbook。
 
-确认网页内容：
+这一步说明：直接改集群不会改 Git。手动同步时，Argo CD 按 Git 把集群改回去。
+
+## 用 hello 学改
+
+`hello` 指向你自己的仓库 `main` 分支、`app/` 目录。它现在是 OutOfSync、Missing，`hello` 命名空间还不存在。声明里已经写了 `CreateNamespace=true`，点同步时会把命名空间建出来。
+
+在 Argo CD 里打开 `hello`，点 **SYNC**，再点 **SYNCHRONIZE**。这次不用再勾 AUTO-CREATE NAMESPACE，那一项已经写在 `gitops/application.yaml` 里。同步成功后核对：
 
 ```powershell
+kubectl -n argocd get applications.argoproj.io hello
+kubectl -n hello get cm,deploy,svc,pod
 kubectl -n hello port-forward svc/hello 8081:80
 ```
 
-浏览器打开 `http://localhost:8081`，应看到 `hello from git`。
+第一行应是 Synced 和 Healthy。浏览器打开 `http://localhost:8081`，应看到 `hello from git` 和 `replicas: 1`。这个终端保持开着。guestbook 的 `8082` 不要停，两个页面可以同时看。
 
-### 6. 改 Git，看 OutOfSync，再同步
+然后改 Git，让集群落后于仓库。把 `app/deployment.yaml` 的 `replicas: 1` 改成 `2`，把 `app/configmap.yaml` 里的 `replicas: 1` 改成 `replicas: 2`。提交并推送：
 
-把 `app/deployment.yaml` 的 `replicas: 1` 改成 `2`，把 `app/configmap.yaml` 里的 `replicas: 1` 改成 `replicas: 2`。提交并推送。
+```powershell
+git add app/deployment.yaml app/configmap.yaml
+git commit -m "show two replicas"
+git push
+```
 
-网页上点这个应用的 **REFRESH**。状态变成 OutOfSync。点 **DIFF**，能看到副本数和网页文字的差异。再点 Sync。
+推送走的是本机 Git 代理。Argo CD 的 `repo-server` 在集群里面，不使用你电脑上的 `127.0.0.1:7890`。推送成功只说明你的电脑能把提交送到 GitHub。
+
+回到 `hello` 的页面，点 **REFRESH**。状态变成 OutOfSync。点 **DIFF**，能看到副本数和网页文字。再点 **SYNC**。
 
 ```powershell
 kubectl -n hello get pods
 ```
 
-应有 2 个 Pod。刷新 `http://localhost:8081`，文字也变成 2。
+应有 2 个 Pod。刷新 `http://localhost:8081`，文字变成 `replicas: 2`。这就是主循环：改 Git，Refresh 发现差异，Sync 把差异写进集群。
 
-这一步就是 Argo CD 的全部主循环：Git 是源，Refresh 发现差异，Sync 把差异写进集群。
+下一步打开自动同步。在网页里编辑 `hello`，Sync Policy 选 Automatic，勾上 **PRUNE** 和 **SELF HEAL**，保存。PRUNE 表示 Git 里删掉的资源，集群里也删掉。SELF HEAL 表示有人直接改了集群，控制器会改回 Git 里的值。
 
-### 7. 打开自动同步
+把副本和网页文字改回 1，提交并推送。这次不要点 Sync。等十几秒到一分钟，应用自己回到 Synced，Pod 回到 1 个。
 
-在网页里编辑 `hello`，把 Sync Policy 改成 Automatic，并勾上 **PRUNE**。PRUNE 的含义是：Git 里删掉的资源，集群里也删掉。
-
-再把副本改回 1，提交推送。这次不要点 Sync。等十几秒到一分钟，应用会自己回到 Synced，Pod 回到 1 个。
-
-自动同步加上自愈（Self Heal，在同一页里）之后，有人用 `kubectl scale` 直接改集群，控制器也会把副本数改回 Git 里的值。可以试一次：
+再试自愈：
 
 ```powershell
 kubectl -n hello scale deploy/hello --replicas=5
 ```
 
-刷新 Argo CD 页面，会看到它把副本拉回去。这就是「集群可以被改，但 Git 说了算」。
+刷新 Argo CD 页面。副本会被拉回 Git 里的数量。guestbook 上你是手动点 Sync 把它拉回去的。hello 开了自动同步和自愈之后，控制器自己做这件事。
 
-### 8. 回滚
-
-打开 `hello` 的 **HISTORY AND ROLLBACK**。每次成功的 Sync 都有一条记录。选上一条，点 Rollback。集群回到那一次同步的内容。
-
-回滚改的是集群里这一次的结果。Git 上最新提交还在。下一次自动同步仍会走向 Git 的最新提交。想让回滚留下来，需要把 Git 也回到对应的提交。
+最后看回滚。打开 `hello` 的 **HISTORY AND ROLLBACK**，选上一条成功的同步，点 Rollback。集群回到那一次的内容。Git 上最新提交还在。下一次自动同步仍会走向 Git 的最新提交。想让回滚留下来，需要把 Git 也回到对应的提交再推送。
 
 ## 管它的时候你在管什么
 
