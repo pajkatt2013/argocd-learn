@@ -174,7 +174,7 @@ kubectl -n hello get pods
 
 应有 2 个 Pod。刷新 `http://localhost:8081`，文字变成 `replicas: 2`。这就是主循环：改 Git，Refresh 发现差异，Sync 把差异写进集群。
 
-下一步打开自动同步。在网页里编辑 `hello`，Sync Policy 选 Automatic，勾上 **PRUNE** 和 **SELF HEAL**，保存。PRUNE 表示 Git 里删掉的资源，集群里也删掉。SELF HEAL 表示有人直接改了集群，控制器会改回 Git 里的值。
+下一步打开自动同步。这个开关不在 **SYNC** 弹窗里，那个窗口只决定这一次同步。打开 `hello`，点顶上的 **DETAILS**。右侧摘要里有 **SYNC POLICY**，现在是 NONE。勾上 **ENABLE AUTO-SYNC**，在确认框里点 OK。勾上之后才会出现 **PRUNE RESOURCES** 和 **SELF HEAL**，两个都勾上，各自再确认一次。PRUNE RESOURCES 表示 Git 里删掉的资源，集群里也删掉。SELF HEAL 表示有人直接改了集群，控制器会改回 Git 里的值。
 
 把副本和网页文字改回 1，提交并推送。这次不要点 Sync。等十几秒到一分钟，应用自己回到 Synced，Pod 回到 1 个。
 
